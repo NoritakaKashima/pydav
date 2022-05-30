@@ -4,10 +4,11 @@
 <D:href>{{ o['href'] }}</D:href>
 <D:propstat>
 <D:prop>
-{#<D:creationdate>1997-12-01T17:42:21-08:00</D:creationdate>#}
-    {#<D:displayname>{{ o['displayname'] }}</D:displayname>#}
-{% if o['isdir'] %}<D:resourcetype><D:collection /></D:resourcetype>{% else %}<D:resourcetype />{% endif %}
-<D:getcontentlength>0</D:getcontentlength>
+{% if o['isdir'] %}<D:resourcetype><D:collection/></D:resourcetype>{% else %}<D:resourcetype/>{% endif %}
+<D:getcontentlength>{{ o['getcontentlength'] }}</D:getcontentlength>
+{#<D:creationdate>{{ o['creationdate'] }}</D:creationdate>
+<D:displayname>{{ o['displayname'] }}</D:displayname>
+<D:getlastmodified>{{ o['getlastmodified'] }}</D:getlastmodified>#}
 </D:prop>
 <D:status>HTTP/1.1 200 OK</D:status>
 </D:propstat>

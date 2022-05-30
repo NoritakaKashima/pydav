@@ -1,6 +1,9 @@
+import datetime
+import os
 from flask.views import MethodView
 from flask import request, abort, render_template, render_template_string
-import os
+import auth
+
 
 class DavView(MethodView):
     methods = ['HEAD', 'GET', 'PROPFIND', 'OPTIONS']
@@ -13,19 +16,22 @@ class DavView(MethodView):
     def __init__(self):
         super().__init__()
         self.ALLOW_PROPFIND_INFINITY = False
-        self.fsroot = './venv/'
+        self.fsroot = './davroot/'
 
+    @auth.auth.login_required
     def dispatch_request(self, *args, **kwargs):
-        meth = getattr(self, request.method.lower(), None)
-
-        # If the request method is HEAD and we don't have a handler for it
-        # retry with GET.
-        if meth is None and request.method == "HEAD":
-            meth = getattr(self, "get", None)
-        if 'path' not in kwargs.keys():
-            kwargs['path'] = ''
-        assert meth is not None, f"Unimplemented method {request.method!r}"
-        return meth(*args, **kwargs)
+        return super().dispatch_request(*args, **kwargs)
+    # def dispatch_request(self, *args, **kwargs):
+    #     meth = getattr(self, request.method.lower(), None)
+    #
+    #     # If the request method is HEAD and we don't have a handler for it
+    #     # retry with GET.
+    #     if meth is None and request.method == "HEAD":
+    #         meth = getattr(self, "get", None)
+    #     if 'path' not in kwargs.keys():
+    #         kwargs['path'] = ''
+    #     assert meth is not None, f"Unimplemented method {request.method!r}"
+    #     return meth(*args, **kwargs)
 
     def get(self, path):
         begin = 0
@@ -55,21 +61,30 @@ class DavView(MethodView):
             headers = {'Content-Type': 'application/xml; charset="utf-8"'}
             res = render_template('prop.xml', objects=l).encode('utf-8')
             print(res)
-            return res, 200, headers
+            return res, 207, headers
         else:
             abort(403)  # depth of infinity are not allowed
 
     def find(self, path, depth, body):
+        def get_prop(base, obj):
+            isdir = os.path.isdir(self.dav2fs(base + obj))
+            info = os.stat(self.dav2fs(base + obj))
+            dt_create = datetime.datetime.fromtimestamp(info.st_ctime).strftime("%a, %d %b %Y %H:%M:%S GMT")
+            dt_modify = datetime.datetime.fromtimestamp(info.st_mtime).strftime("%a, %d %b %Y %H:%M:%S GMT")
+            href = 'http://localhost:5000/' + base + obj
+            if isdir and not href.endswith('/'):
+                href += '/'
+            return {'href': href, 'displayname': obj, 'isdir': isdir, 'creationdate': dt_create, 'getlastmodified': dt_modify, 'getcontentlength': info.st_size}
+
         if b'allprop' in body:
             pass
         elif b'propname' in body:
             pass
         else:
             pass
-        l = os.listdir(self.dav2fs(path))
-        ret = []
-        for x in l:
-            isdir = os.path.isdir(self.dav2fs(x))
-            href = 'http://localhost:5000/' + path + x + ('/' if isdir else '')
-            ret.append({'href': href, 'displayname': x, 'isdir': isdir})
+        ret = [get_prop(path, '')]
+        if 0 < depth:
+            l = os.listdir(self.dav2fs(path))
+            for x in l:
+                ret.append(get_prop(path, x))
         return ret
