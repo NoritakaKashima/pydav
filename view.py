@@ -5,18 +5,45 @@ from flask import request, abort, render_template, render_template_string
 import auth
 
 
+class FileSystem:
+    def __init__(self, root):
+        # super().__init__()
+        self.fsroot = root
+
+    def dav2fs(self, base, obj=None):
+        ret = os.path.join(self.fsroot, base)
+        if obj:
+            return os.path.join(ret, base)
+        return ret
+
+    def isdir(self, path):
+        return os.path.isdir(path)
+
+    def listdir(self, path):
+        fspath = self.dav2fs(path)
+        return os.listdir(fspath)
+
+    def get_prop(self, base, obj):
+        isdir = self.isdir(self.dav2fs(base, obj))
+        info = os.stat(self.dav2fs(base, obj))
+        dt_create = datetime.datetime.fromtimestamp(info.st_ctime).strftime("%a, %d %b %Y %H:%M:%S GMT")
+        dt_modify = datetime.datetime.fromtimestamp(info.st_mtime).strftime("%a, %d %b %Y %H:%M:%S GMT")
+        href = '/' + base + obj
+        if isdir and not href.endswith('/'):
+            href += '/'
+        return {'href': href, 'displayname': obj, 'isdir': isdir, 'creationdate': dt_create,
+                'getlastmodified': dt_modify, 'getcontentlength': info.st_size}
+
+
 class DavView(MethodView):
     methods = ['HEAD', 'GET', 'PROPFIND', 'OPTIONS']
         # , 'PROPPATCH', 'MKCOL', 'DELETE',
         #        'COPY', 'MOVE', 'PUT'
 
-    def dav2fs(self, path):
-        return self.fsroot + path
-
-    def __init__(self):
+    def __init__(self, filesystem):
         super().__init__()
         self.ALLOW_PROPFIND_INFINITY = False
-        self.fsroot = './davroot/'
+        self.filesystem = filesystem
 
     @auth.auth.login_required
     def dispatch_request(self, *args, **kwargs):
@@ -66,25 +93,15 @@ class DavView(MethodView):
             abort(403)  # depth of infinity are not allowed
 
     def find(self, path, depth, body):
-        def get_prop(base, obj):
-            isdir = os.path.isdir(self.dav2fs(base + obj))
-            info = os.stat(self.dav2fs(base + obj))
-            dt_create = datetime.datetime.fromtimestamp(info.st_ctime).strftime("%a, %d %b %Y %H:%M:%S GMT")
-            dt_modify = datetime.datetime.fromtimestamp(info.st_mtime).strftime("%a, %d %b %Y %H:%M:%S GMT")
-            href = 'http://localhost:5000/' + base + obj
-            if isdir and not href.endswith('/'):
-                href += '/'
-            return {'href': href, 'displayname': obj, 'isdir': isdir, 'creationdate': dt_create, 'getlastmodified': dt_modify, 'getcontentlength': info.st_size}
-
         if b'allprop' in body:
             pass
         elif b'propname' in body:
             pass
         else:
             pass
-        ret = [get_prop(path, '')]
+        ret = [self.filesystem.get_prop(path, '')]
         if 0 < depth:
-            l = os.listdir(self.dav2fs(path))
+            l = self.filesystem.listdir(path)
             for x in l:
-                ret.append(get_prop(path, x))
+                ret.append(self.filesystem.get_prop(path, x))
         return ret
