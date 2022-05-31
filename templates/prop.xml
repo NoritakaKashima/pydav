@@ -1,14 +1,16 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <D:multistatus xmlns:D="DAV:">
 {% for o in objects %}<D:response>
-<D:href>{{ o['href'] }}</D:href>
+<D:href>{{ o.href }}</D:href>
 <D:propstat>
-<D:prop>
-{% if o['isdir'] %}<D:resourcetype><D:collection/></D:resourcetype>{% else %}<D:resourcetype/>{% endif %}
+<D:prop><!--{{ o.isdir }}-->
+{% if o.isdir %}<D:resourcetype><D:collection/></D:resourcetype>{% else %}<D:resourcetype/>{% endif %}
 <D:getcontentlength>{{ o['getcontentlength'] }}</D:getcontentlength>
-{#<D:creationdate>{{ o['creationdate'] }}</D:creationdate>
+<D:creationdate>{{ o['creationdate'] }}</D:creationdate>
 <D:displayname>{{ o['displayname'] }}</D:displayname>
-<D:getlastmodified>{{ o['getlastmodified'] }}</D:getlastmodified>#}
+<D:getlastmodified>{{ o['getlastmodified'] }}</D:getlastmodified>
+<D:getetag>{{ o.getetag }}</D:getetag>
+<D:getcontenttype>{{ o.getcontenttype }}</D:getcontenttype>
 </D:prop>
 <D:status>HTTP/1.1 200 OK</D:status>
 </D:propstat>

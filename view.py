@@ -3,6 +3,7 @@ import os
 from flask.views import MethodView
 from flask import request, abort, render_template, render_template_string
 import auth
+import re
 
 
 class FileSystem:
@@ -13,7 +14,7 @@ class FileSystem:
     def dav2fs(self, base, obj=None):
         ret = os.path.join(self.fsroot, base)
         if obj:
-            return os.path.join(ret, base)
+            return os.path.join(ret, obj)
         return ret
 
     def isdir(self, path):
@@ -26,13 +27,38 @@ class FileSystem:
     def get_prop(self, base, obj):
         isdir = self.isdir(self.dav2fs(base, obj))
         info = os.stat(self.dav2fs(base, obj))
-        dt_create = datetime.datetime.fromtimestamp(info.st_ctime).strftime("%a, %d %b %Y %H:%M:%S GMT")
-        dt_modify = datetime.datetime.fromtimestamp(info.st_mtime).strftime("%a, %d %b %Y %H:%M:%S GMT")
-        href = '/' + base + obj
+        name = obj if obj else os.path.basename(base)
+        dt_create = datetime.datetime.fromtimestamp(info.st_ctime)
+        dt_modify = datetime.datetime.fromtimestamp(info.st_mtime)
+        # href = '/' + base + obj
+        href = 'http://localhost:5000/' + base + obj
         if isdir and not href.endswith('/'):
             href += '/'
-        return {'href': href, 'displayname': obj, 'isdir': isdir, 'creationdate': dt_create,
-                'getlastmodified': dt_modify, 'getcontentlength': info.st_size}
+        return {'href': href,
+                'displayname': name,
+                'isdir': isdir,
+                'creationdate': dt_create.strftime("%a, %d %b %Y %H:%M:%S GMT"),
+                'getlastmodified': dt_modify.strftime("%a, %d %b %Y %H:%M:%S GMT"),
+                'getcontentlength': info.st_size,
+                'getetag': dt_modify.strftime("%Y%m%d%H%M%S"),
+                'getcontenttype': 'text/plain'}
+
+    def open(self, path, start, end):
+        fspath = self.dav2fs(path)
+        length = None if end is None else end - start
+
+        def generate():
+            with open(path, 'rb') as f:
+                f.seek(begin)
+                read = 0
+                while not length or read < length:
+                    length_to_read = min(length - read, BUFFER_READ) if length else BUFFER_READ
+                    d = f.read(length_to_read)
+                    if d == 0:
+                        break
+                    read += length_to_read
+                    yield d
+        return generate
 
 
 class DavView(MethodView):
@@ -69,7 +95,7 @@ class DavView(MethodView):
                 begin = int(r0)
             if r1:
                 end = int(r1)
-        return "test page.", 200, {}
+        return self.filesystem.open(path, begin, end)(), 200, {}
 
     def head(self, path):
         pass
@@ -83,22 +109,27 @@ class DavView(MethodView):
         depth = int(d) if d.isdigit() else 1  # max depth
         if self.ALLOW_PROPFIND_INFINITY or depth <= 1:
             body = request.data
-            print(body)
+            print(f'PROPFIND depth: {depth} url: {request.url} body: {body}')
             l = self.find(path, depth, body)
-            headers = {'Content-Type': 'application/xml; charset="utf-8"'}
             res = render_template('prop.xml', objects=l).encode('utf-8')
             print(res)
-            return res, 207, headers
+            return res, 207, {'Content-Type': 'application/xml; charset="utf-8"'}
         else:
             abort(403)  # depth of infinity are not allowed
 
     def find(self, path, depth, body):
         if b'allprop' in body:
-            pass
+            print('allprop')
         elif b'propname' in body:
-            pass
+            print('propname')
         else:
-            pass
+            is_propname = False
+            for line in body.decode('utf-8').split('\n'):
+                if 'prop>' in line:
+                    is_propname = not is_propname
+                elif is_propname:
+                    print(line)
+
         ret = [self.filesystem.get_prop(path, '')]
         if 0 < depth:
             l = self.filesystem.listdir(path)
