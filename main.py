@@ -11,6 +11,6 @@ if __name__ == '__main__':
     # davview = view.DavView()
     view = view.DavView.as_view('view0', view.FileSystem('./davroot'))
     app.add_url_rule('/', defaults={'path': ''}, view_func=view)
-    app.add_url_rule('/<path>', view_func=view)
+    app.add_url_rule('/<path:path>', view_func=view)
 
     app.run(debug=True)

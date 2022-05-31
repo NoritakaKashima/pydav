@@ -1,5 +1,7 @@
 import datetime
 import os
+
+import flask
 from flask.views import MethodView
 from flask import request, abort, render_template, render_template_string
 import auth
@@ -13,12 +15,18 @@ class FileSystem:
 
     def dav2fs(self, base, obj=None):
         ret = os.path.join(self.fsroot, base)
+        if os.path.sep == '\\':
+            ret = ret.replace('/', '\\')
+        #ret = os.path.normpath(ret)
         if obj:
             return os.path.join(ret, obj)
         return ret
 
+    def isfile(self, path):
+        return os.path.isfile(self.dav2fs(path))
+
     def isdir(self, path):
-        return os.path.isdir(path)
+        return os.path.isdir(self.dav2fs(path))
 
     def listdir(self, path):
         fspath = self.dav2fs(path)
@@ -43,13 +51,24 @@ class FileSystem:
                 'getetag': dt_modify.strftime("%Y%m%d%H%M%S"),
                 'getcontenttype': 'text/plain'}
 
-    def open(self, path, start, end):
+    def open(self, path, _range):
+        BUFFER_READ = 4096
         fspath = self.dav2fs(path)
-        length = None if end is None else end - start
+        size = os.path.getsize(fspath)
+        start = 0
+        length = 0
+        if _range:
+            start = _range[0]
+            if _range[1]:
+                length = _range[1] - start + 1
+            else:
+                length = size - start
+        else:
+            length = size
 
         def generate():
-            with open(path, 'rb') as f:
-                f.seek(begin)
+            with open(fspath, 'rb') as f:
+                f.seek(start)
                 read = 0
                 while not length or read < length:
                     length_to_read = min(length - read, BUFFER_READ) if length else BUFFER_READ
@@ -74,28 +93,17 @@ class DavView(MethodView):
     @auth.auth.login_required
     def dispatch_request(self, *args, **kwargs):
         return super().dispatch_request(*args, **kwargs)
-    # def dispatch_request(self, *args, **kwargs):
-    #     meth = getattr(self, request.method.lower(), None)
-    #
-    #     # If the request method is HEAD and we don't have a handler for it
-    #     # retry with GET.
-    #     if meth is None and request.method == "HEAD":
-    #         meth = getattr(self, "get", None)
-    #     if 'path' not in kwargs.keys():
-    #         kwargs['path'] = ''
-    #     assert meth is not None, f"Unimplemented method {request.method!r}"
-    #     return meth(*args, **kwargs)
 
     def get(self, path):
-        begin = 0
-        end = None
+        if not self.filesystem.isfile(path):
+            abort(404)
+        _range = None
         if 'Range' in request.headers:
             r0, r1 = request.headers['Range'].split("-")
-            if r0:
-                begin = int(r0)
-            if r1:
-                end = int(r1)
-        return self.filesystem.open(path, begin, end)(), 200, {}
+            _range = (int(r0), int(r1) if r1 else None)
+        stream = self.filesystem.open(path, _range)
+        status = 206 if _range else 200
+        return flask.Response(stream(), status, headers={}, direct_passthrough=True)
 
     def head(self, path):
         pass
@@ -129,9 +137,9 @@ class DavView(MethodView):
                     is_propname = not is_propname
                 elif is_propname:
                     print(line)
-
-        ret = [self.filesystem.get_prop(path, '')]
-        if 0 < depth:
+        p = self.filesystem.get_prop(path, '')
+        ret = [p]
+        if p['isdir'] and 0 < depth:
             l = self.filesystem.listdir(path)
             for x in l:
                 ret.append(self.filesystem.get_prop(path, x))
