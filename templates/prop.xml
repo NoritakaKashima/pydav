@@ -1,19 +1,38 @@
 <?xml version="1.0" encoding="utf-8" ?>
-<D:multistatus xmlns:D="DAV:">
-{% for o in objects %}<D:response>
-<D:href>{{ o.href }}</D:href>
-<D:propstat>
-<D:prop><!--{{ o.isdir }}-->
-{% if o.isdir %}<D:resourcetype><D:collection/></D:resourcetype>{% else %}<D:resourcetype/>{% endif %}
-<D:getcontentlength>{{ o['getcontentlength'] }}</D:getcontentlength>
-<D:creationdate>{{ o['creationdate'] }}</D:creationdate>
-<D:displayname>{{ o['displayname'] }}</D:displayname>
-<D:getlastmodified>{{ o['getlastmodified'] }}</D:getlastmodified>
-<D:getetag>{{ o.getetag }}</D:getetag>
-<D:getcontenttype>{{ o.getcontenttype }}</D:getcontenttype>
-</D:prop>
-<D:status>HTTP/1.1 200 OK</D:status>
-</D:propstat>
-</D:response>
-{% endfor %}
-</D:multistatus>
+{#- <multistatus xmlns="DAV:" xmlns:A="atom:"> -#}
+<multistatus xmlns="DAV:">
+{%- for o in objs -%}
+{#- -#}<response>
+{#-     -#}<href>{{ o.href }}</href>
+{#-     -#}<propstat>
+{#-         -#}<prop>{%- set props = param.props.copy() -%}
+{#-         -#}{%- for k in o.prop_keys %}
+{#-             -#}{%- if param.allprop or k in param.props -%}
+{#-                 -#}{%- if k == 'resourcetype' -%}
+{#-                     -#}{%- if o.props.resourcetype -%}
+{#-                         -#}<resourcetype><collection/></resourcetype>
+{#-                     -#}{%- else -%}
+{#-                         -#}<resourcetype/>
+{#-                     -#}{%- endif -%}
+{#-                     -#}{%- set dummy = props.pop(k) -%}
+{#-                 -#}{%- else -%}
+{#-                     -#}{{ '<tag>{}</tag>'.replace('tag', k).format(o.props[k])|safe }}{%- set dummy = props.pop(k) -%}
+{#-                 -#}{%- endif -%}
+{#-             -#}{%- endif -%}
+{#-         -#}{%- endfor -%}
+{#-         -#}</prop>
+{#-         -#}<status>HTTP/1.1 200 OK</status>
+{#-     -#}</propstat>
+{#-         -#}{%- if props -%}
+{#-     -#}<propstat>
+{#-         -#}<prop>
+{#-             -#}{%- for k in props %}
+{#-                     -#}{{ '<tag/>'.replace('tag', k)|safe }}{#- -#}
+{#-             -#}{%- endfor %}
+{#-         -#}</prop>
+{#-         -#}<status>HTTP/1.1 403 Forbidden</status>
+{#-     -#}</propstat>
+{#-         -#}{%- endif -%}
+{#- -#}</response>
+{%- endfor -%}
+</multistatus>

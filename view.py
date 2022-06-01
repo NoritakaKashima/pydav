@@ -1,4 +1,5 @@
 import datetime
+import gzip
 import os
 
 import flask
@@ -6,6 +7,12 @@ from flask.views import MethodView
 from flask import request, abort, render_template, render_template_string
 import auth
 import re
+
+types = {
+    '.txt': 'text/plain',
+    '.png': 'image/png',
+    '.jpg': 'image/jpg',
+}
 
 
 class FileSystem:
@@ -33,8 +40,9 @@ class FileSystem:
         return os.listdir(fspath)
 
     def get_prop(self, base, obj):
-        isdir = self.isdir(self.dav2fs(base, obj))
-        info = os.stat(self.dav2fs(base, obj))
+        fspath = self.dav2fs(base, obj)
+        isdir = os.path.isdir(fspath)
+        info = os.stat(fspath)
         name = obj if obj else os.path.basename(base)
         dt_create = datetime.datetime.fromtimestamp(info.st_ctime)
         dt_modify = datetime.datetime.fromtimestamp(info.st_mtime)
@@ -42,14 +50,19 @@ class FileSystem:
         href = 'http://localhost:5000/' + base + obj
         if isdir and not href.endswith('/'):
             href += '/'
-        return {'href': href,
-                'displayname': name,
-                'isdir': isdir,
-                'creationdate': dt_create.strftime("%a, %d %b %Y %H:%M:%S GMT"),
-                'getlastmodified': dt_modify.strftime("%a, %d %b %Y %H:%M:%S GMT"),
-                'getcontentlength': info.st_size,
-                'getetag': dt_modify.strftime("%Y%m%d%H%M%S"),
-                'getcontenttype': 'text/plain'}
+        b, ext = os.path.splitext(fspath)
+        type = ''
+        if ext in types:
+            type = types[ext]
+        props = {
+            'displayname': name,
+            'resourcetype': isdir,
+            'creationdate': dt_create.strftime("%a, %d %b %Y %H:%M:%S GMT"),
+            'getlastmodified': dt_modify.strftime("%a, %d %b %Y %H:%M:%S GMT"),
+            'getcontentlength': info.st_size,
+            'getetag': dt_modify.strftime("%Y%m%d%H%M%S"),
+            'getcontenttype': type}
+        return {'href': href, 'props': props, 'prop_keys': list(props.keys())}
 
     def open(self, path, _range):
         BUFFER_READ = 4096
@@ -99,6 +112,7 @@ class DavView(MethodView):
             abort(404)
         _range = None
         if 'Range' in request.headers:
+            print(f'Range request: {request.headers["Range"]}')
             r0, r1 = request.headers['Range'].split("-")
             _range = (int(r0), int(r1) if r1 else None)
         stream = self.filesystem.open(path, _range)
@@ -109,37 +123,56 @@ class DavView(MethodView):
         pass
 
     def options(self, path):
-        headers = {'DAV': '1,2', 'MS-Author-Via': 'DAV', 'Allow': ','.join(self.methods)}
+        headers = {'DAV': '1,2', 'MS-Author-Via': 'DAV', 'Allow': ','.join(self.methods), 'Accept-Ranges': 'bytes'}
         return '', 200, headers
 
     def propfind(self, path):
+        pat = r'<(.+:)?(.+)\s*/>'
+
+        def get_prop(str):
+            m = re.match(pat, str)
+            if m:
+                return m.group(1), m.group(2)
+            else:
+                return '', ''
+
         d = request.headers.get('Depth', 'infinity')
         depth = int(d) if d.isdigit() else 1  # max depth
         if self.ALLOW_PROPFIND_INFINITY or depth <= 1:
             body = request.data
             print(f'PROPFIND depth: {depth} url: {request.url} body: {body}')
-            l = self.find(path, depth, body)
-            res = render_template('prop.xml', objects=l).encode('utf-8')
+            param = {'allprop': False}
+            if b'allprop' in body:
+                param['allprop'] = True
+            elif b'propname' in body:
+                print('propname')
+            else:
+                is_propname = False
+                props = {}
+                for line in body.decode('utf-8').replace('\n', '').split('>'):
+                    line += '>'
+                    if 'prop>' in line:
+                        is_propname = not is_propname
+                    elif is_propname:
+                        p = get_prop(line)
+                        props[p[1]] = 0
+                param['props'] = props
+
+            objs = self.find(path, depth, body)
+            res = render_template('prop.xml', param=param, objs=objs).encode('utf-8')
             print(res)
-            return res, 207, {'Content-Type': 'application/xml; charset="utf-8"'}
+            h = {'Content-Type': 'application/xml; charset="utf-8"', 'Accept-Ranges': 'bytes'}
+            if 'gzip' in request.accept_encodings and 100 < len(res):
+                res = gzip.compress(res)
+                h['Content-Encoding'] = 'gzip'
+            return res, 207, h
         else:
             abort(403)  # depth of infinity are not allowed
 
     def find(self, path, depth, body):
-        if b'allprop' in body:
-            print('allprop')
-        elif b'propname' in body:
-            print('propname')
-        else:
-            is_propname = False
-            for line in body.decode('utf-8').split('\n'):
-                if 'prop>' in line:
-                    is_propname = not is_propname
-                elif is_propname:
-                    print(line)
         p = self.filesystem.get_prop(path, '')
         ret = [p]
-        if p['isdir'] and 0 < depth:
+        if p['props']['resourcetype'] and 0 < depth:
             l = self.filesystem.listdir(path)
             for x in l:
                 ret.append(self.filesystem.get_prop(path, x))
